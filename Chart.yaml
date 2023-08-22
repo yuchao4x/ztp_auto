@@ -1,0 +1,7 @@
+apiVersion: v1
+appVersion: "0.1"
+name: ztp-auto
+description: |
+  Bevo auto
+engine: gotpl
+version: "0.1"

@@ -1,0 +1,210 @@
+all:
+  vars:
+    cluster_name: hub-kvm
+    base_dns_domain: {{ .Values.base_domain }}
+    openshift_full_version: 4.12.4 
+
+
+    api_vip: {{ .Values.api_vip }}
+    ingress_vip: {{ .Values.ingress_vip }}
+
+    vip_dhcp_allocation: false
+
+    machine_network_cidr: {{ .Values.machine_network_cidr }}
+
+    service_network_cidr: 172.30.0.0/16
+    cluster_network_cidr: 10.128.0.0/14
+    cluster_network_host_prefix: 23
+    network_type: OVNKubernetes
+
+
+    http_proxy: {{ .Values.http_proxy }}
+    https_proxy: {{ .Values.https_proxy }}
+    no_proxy: {{`"{{ hostvars['http_store']['ansible_host'] }},{{ machine_network_cidr }},{{ service_network_cidr }},{{ cluster_network_cidr }},{{ ingress_vip }},{{ api_vip }},.{{ cluster_name }}.{{ base_dns_domain }},.{{ base_dns_domain }},127.0.0.1,localhost,bevolake-registry"`}}
+    setup_ntp_service: false
+    setup_dns_service: true
+    setup_pxe_service: false
+    setup_registry_service: false
+    setup_http_store_service: true
+    setup_assisted_installer: true
+
+    ntp_server: {{ .Values.ntp_server }}
+
+    use_local_mirror_registry: false
+
+    discovery_iso_name: {{`"discovery/{{ cluster_name }}/discovery-image.iso"`}}
+    discovery_iso_server: {{`"http://{{ hostvars['http_store']['ansible_host'] }}"`}}
+
+    path_base_dir: /opt/ocp
+
+    repo_root_path: {{`"{{ path_base_dir }}/`}}{{ .Values.repo_root_path }}"
+    fetched_dest: {{`"{{ repo_root_path }}/fetched"`}}
+    pull_secret_lookup_paths:
+      - {{`"{{ fetched_dest }}/pull-secret.txt"`}}
+      - {{`"{{ repo_root_path }}/pull-secret.txt"`}}
+
+    ssh_public_key_lookup_paths:
+      - {{`"{{ fetched_dest }}/ssh_keys/{{ cluster_name }}.pub"`}}
+      - {{`"{{ repo_root_path }}/ssh_public_key.pub"`}}
+      - ~/.ssh/id_rsa.pub
+
+    ssh_key_dest_base_dir: {{`"{{ path_base_dir }}"`}}
+    kubeconfig_dest_dir: {{`"{{ path_base_dir }}"`}}
+    kubeconfig_dest_filename: {{`"{{ cluster_name }}-kubeconfig"`}}
+    kubeadmin_dest_filename: {{`"{{ cluster_name }}-kubeadmin.vault.yml"`}}
+    local_pull_secret_path: {{`"{{ lookup('first_found', pull_secret_lookup_paths) }}"`}}
+    pull_secret: {{`"{{ lookup('file', local_pull_secret_path) }}"`}}
+    local_ssh_public_key_path: {{`"{{ lookup('first_found', ssh_public_key_lookup_paths) }}"`}}
+    ssh_public_key: {{`"{{ lookup('file', local_ssh_public_key_path) }}"`}}
+    local_mirror_certificate_path: {{`"{{ (setup_registry_service == true) | ternary(
+        fetched_dest + '/' + (hostvars['registry_host']['cert_file_prefix'] | default('registry')) + '.crt',
+        repo_root_path + '/mirror_certificate.txt')
+     }}"`}}
+    mirror_certificate: {{`"{{ lookup('file', local_mirror_certificate_path) }}"`}}
+    openshift_version: {{`"{{ openshift_full_version.split('.')[:2] | join('.') }}"`}}
+    is_valid_single_node_openshift_config: {{`"{{ (groups['nodes'] | length == 1) and (groups['masters'] | length == 1) }}"`}}
+    extra_manifests:
+      - template: {{`"{{ repo_root_path }}/manifests/1_extra_disk/50-master-create-lvs-for-lso.yml.j2"`}}
+      - file: {{`"{{ repo_root_path }}/manifests/1_extra_disk/60-lv-for-lso.yml"`}}
+      - file: {{`"{{ repo_root_path }}/manifests/70-sc-for-lso.yml"`}}
+    install_lso: True
+
+  children:
+    bastions:
+      hosts:
+        bastion:
+          ansible_host: {{ .Values.hub_nic1_ip }}
+          ansible_connection: local
+
+    services:
+      hosts:
+        assisted_installer:
+          ansible_host: {{ .Values.hub_nic1_ip }}
+          host: {{ .Values.hub_nic1_ip }}
+          port: 8090
+          ansible_connection: local
+
+        dns_host:
+          ansible_host: {{ .Values.hub_nic1_ip }}
+          ansible_connection: local
+          upstream_dns: {{ .Values.upstream_dns }}
+          use_dhcp: false
+
+        http_store:
+          ansible_host: {{ .Values.hub_nic1_ip }}
+          ansible_connection: local
+
+        ntp_host:
+          ansible_host: {{ .Values.hub_nic1_ip }}
+
+    vm_hosts:
+      hosts:
+        vm_host:
+          ansible_user: root
+          ansible_host: {{ .Values.hub_nic2_ip }}
+          host_ip_keyword: ansible_host
+          images_dir: {{`"{{ path_base_dir }}/libvirt/images"`}}
+          vm_bridge_ip: {{ .Values.hub_nic1_ip }}
+          vm_bridge_name: {{`"{{ cluster_name }}-br"`}}
+          vm_bridge_interface: {{ .Values.Nic1_name }}
+          dns: {{`"{{ hostvars['dns_host']['ansible_host'] }}"`}}
+          cert_country: US
+          cert_locality: Raleigh
+          cert_organization: Red Hat, Inc.
+          cert_organizational_unit: Lab
+          cert_state: NC
+          
+          network_config:
+            raw:
+              interfaces:
+                - name: {{`"{{ vm_bridge_name }}"`}}
+                  state: up
+                  type: linux-bridge
+                  ipv4:
+                    address:
+                      - ip: {{`"{{ vm_bridge_ip }}"`}}
+                        prefix-length: {{ .Values.prefix_length }}
+                    dhcp: false
+                    enabled: true
+                  bridge:
+                    options:
+                      group-forward-mask: 0
+                      mac-ageing-time: 20
+                      multicast-snooping: True
+                      stp:
+                        enabled: False
+                    port:
+                      - name: {{`"{{ vm_bridge_interface }}"`}}
+                        stp-hairpin-mode: False
+                        stp-path-cost: 100
+                        stp-priority: 32
+              dns-resolver:
+                  config:
+                    server:
+                    - {{ .Values.upstream_dns }}
+              routes:
+                config:
+                  - destination: 0.0.0.0/0
+                    next-hop-address: {{ .Values.next_hop_address }}
+                    next-hop-interface: {{`"{{ vm_bridge_name }}"`}}
+
+    nodes:
+      vars:
+        bmc_user: {{`"{{ VAULT_NODES_BMC_USER | mandatory }}"`}}
+        bmc_password: {{`"{{ VAULT_NODES_BMC_PASSWORD | mandatory }}"`}}
+      children:
+        masters:
+          vars:
+            role: master
+            vendor: KVM
+            bmc_address: "{{ .Values.hub_nic1_ip }}:8082"
+            
+            network_config:
+              raw:
+                interfaces:
+                  - name: enp1s0
+                    type: ethernet
+                    state: up
+                    ipv4:
+                      address:
+                        - ip: {{`"{{ ansible_host }}"`}}
+                          prefix-length: {{ .Values.prefix_length }}
+                      enabled: true
+                dns-resolver:
+                  config:
+                    server:
+                    - {{ .Values.hub_nic1_ip }}
+                routes:
+                  config:
+                    - destination: 0.0.0.0/0
+                      next-hop-address: {{ .Values.next_hop_address }}
+                      next-hop-interface: enp1s0
+                      
+            mac_interface_map:
+              - logical_nic_name: enp1s0
+                mac_address: {{`"{{ mac }}"`}}
+                
+            vm_host: vm_host
+            
+            openshift_labels:
+              ran.openshift.io/lso: ""
+              
+            vm_spec:
+              cpu_cores: 16
+              ram_mib: 65536
+              disk_size_gb: 128
+              extra_disks:
+                extra_disk1: 200
+
+          hosts:
+            super1:
+              ansible_host: {{ .Values.super1_ip }}
+              mac: {{ .Values.super1_mac }}
+
+            super2:
+              ansible_host: {{ .Values.super2_ip }}
+              mac: {{ .Values.super2_mac }}
+
+            super3:
+              ansible_host: {{ .Values.super3_ip }}
+              mac: {{ .Values.super3_mac }}
