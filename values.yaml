@@ -1,5 +1,5 @@
-#repo_root_path，under your work dir, for example: /opt/ocp
-#so the result after splicing is /opt/ocp/OCP_CAAS_PAAS_PACKSGE/xaas/ocp/automation/crucible
+#repo_root_path，This variable is immediately after the work dir, for example: /opt/ocp.
+#So the result after splicing is /opt/ocp/OCP_CAAS_PAAS_PACKSGE/xaas/ocp/automation/crucible
 repo_root_path: OCP_CAAS_PAAS_PACKSGE/xaas/ocp/automation/crucible
 
 #hub-cluster basic settings
