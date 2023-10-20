@@ -1,7 +1,9 @@
-#repo_root_path
-repo_root_path: OCP_CAAS_PAAS_PACKSGE
+#repo_root_path，under your work dir, for example: /opt/ocp
+#so the result after splicing is /opt/ocp/OCP_CAAS_PAAS_PACKSGE/xaas/ocp/automation/crucible
+repo_root_path: OCP_CAAS_PAAS_PACKSGE/xaas/ocp/automation/crucible
 
 #hub-cluster basic settings
+#nic1 for internet, nic2 for private network
 base_domain: intel.lab
 api_vip: 10.67.126.120
 ingress_vip: 10.67.126.121
